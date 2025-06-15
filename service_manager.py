@@ -75,24 +75,26 @@ class ServiceManager:
     def _fix_php_fpm_issues(self):
         """Fix common PHP-FPM issues"""
         try:
-            # Fix permissions on PHP-FPM directories
-            php_dirs = ['/var/run/php', '/etc/php/8.2/fpm']
-            
-            for php_dir in php_dirs:
-                if os.path.exists(php_dir):
-                    subprocess.run(['chown', '-R', 'www-data:www-data', php_dir], check=False)
-            
             # Create missing directories
             subprocess.run(['mkdir', '-p', '/var/run/php'], check=False)
             subprocess.run(['chown', 'www-data:www-data', '/var/run/php'], check=False)
             
-            # Fix socket permissions
+            # Kill any hanging processes
+            subprocess.run(['pkill', '-f', 'php-fpm'], check=False)
+            
+            # Start PHP-FPM
+            subprocess.run(['systemctl', 'start', 'php8.2-fpm'], check=False)
+            
+            # Wait a moment for socket creation
+            import time
+            time.sleep(2)
+            
+            # Fix socket permissions if exists
             socket_path = '/var/run/php/php8.2-fpm.sock'
             if os.path.exists(socket_path):
                 subprocess.run(['chmod', '666', socket_path], check=False)
-            
-            # Kill any hanging processes
-            subprocess.run(['pkill', '-f', 'php-fpm'], check=False)
+                subprocess.run(['chown', 'www-data:www-data', socket_path], check=False)
+                print("✅ Fixed socket permissions")
             
         except Exception as e:
             print(f"⚠️ Could not fix all PHP-FPM issues: {e}")
