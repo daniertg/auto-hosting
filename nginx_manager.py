@@ -2,16 +2,18 @@ import subprocess
 import os
 
 class NginxManager:
-    def __init__(self):
-        self.php_socket = '/var/run/php/php8.2-fpm.sock'  # Force PHP 8.2 socket
-    
     def configure_nginx(self, project_path, project_id, domain, port):
         """Configure Nginx for project"""
+        # Get PHP socket from service manager
+        from service_manager import ServiceManager
+        service_manager = ServiceManager()
+        php_socket = service_manager.get_php_socket()
+        
         # Remove conflicting configs first
         self._fix_nginx_conflicts()
         
         # Create nginx config
-        nginx_config = self._generate_nginx_config(project_path, project_id, domain, port)
+        nginx_config = self._generate_nginx_config(project_path, project_id, domain, port, php_socket)
         
         # Write config file
         config_path = f'/etc/nginx/sites-available/{project_id}'
@@ -26,7 +28,7 @@ class NginxManager:
         
         print("✅ Nginx configured successfully")
     
-    def _generate_nginx_config(self, project_path, project_id, domain, port):
+    def _generate_nginx_config(self, project_path, project_id, domain, port, php_socket):
         """Generate nginx configuration"""
         return f"""server {{
     listen {port};
@@ -39,7 +41,7 @@ class NginxManager:
     }}
 
     location ~ \\.php$ {{
-        fastcgi_pass unix:{self.php_socket};
+        fastcgi_pass unix:{php_socket};
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
         include fastcgi_params;
