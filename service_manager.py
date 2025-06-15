@@ -4,9 +4,20 @@ import os
 class ServiceManager:
     def restart_services(self):
         """Restart system services"""
+        # Stop Apache first to free port 80
+        self._stop_apache()
         self._manage_php_fpm()
         self._manage_nginx()
         print("✅ Services restarted successfully")
+    
+    def _stop_apache(self):
+        """Stop Apache to prevent port conflicts"""
+        try:
+            subprocess.run(['systemctl', 'stop', 'apache2'], check=False)
+            subprocess.run(['systemctl', 'disable', 'apache2'], check=False)
+            print("✅ Apache stopped and disabled")
+        except Exception as e:
+            print(f"⚠️ Could not stop Apache: {e}")
     
     def _manage_php_fpm(self):
         """Manage PHP-FPM service"""

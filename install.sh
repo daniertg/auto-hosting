@@ -5,6 +5,11 @@ echo "Setting up Laravel Auto Hosting..."
 # Update system
 apt update && apt upgrade -y
 
+# Stop and disable Apache if exists (prevent port 80 conflict)
+systemctl stop apache2 2>/dev/null || true
+systemctl disable apache2 2>/dev/null || true
+echo "✓ Apache stopped and disabled"
+
 # Add PHP repository
 apt install -y software-properties-common
 add-apt-repository ppa:ondrej/php -y
@@ -50,6 +55,10 @@ fi
 # Start services
 systemctl enable nginx php8.2-fpm
 systemctl start nginx php8.2-fpm
+
+# Ensure Nginx is running on port 80
+systemctl restart nginx
+echo "✓ Nginx restarted and should be on port 80"
 
 # Create web directory
 mkdir -p /var/www

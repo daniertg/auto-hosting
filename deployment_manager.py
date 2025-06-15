@@ -2,10 +2,32 @@ import subprocess
 import shutil
 import uuid
 import os
+import requests
 from database_manager import DatabaseManager
 from laravel_manager import LaravelManager
 from nginx_manager import NginxManager
 from service_manager import ServiceManager
+
+def get_server_ip():
+    """Get server public IP address"""
+    try:
+        # Try to get public IP
+        response = requests.get('https://ifconfig.me', timeout=5)
+        if response.status_code == 200:
+            return response.text.strip()
+    except:
+        pass
+    
+    try:
+        # Alternative method
+        response = requests.get('https://api.ipify.org', timeout=5)
+        if response.status_code == 200:
+            return response.text.strip()
+    except:
+        pass
+    
+    # Fallback to localhost
+    return 'localhost'
 
 def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
     """Main deployment function"""
@@ -14,6 +36,10 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
     
     try:
         print(f"🚀 Starting deployment for project: {project_id}")
+        
+        # Stop Apache to free port 80
+        subprocess.run(['systemctl', 'stop', 'apache2'], check=False)
+        print("✓ Apache stopped")
         
         # 1. Clone repository
         print("📥 Cloning repository...")
@@ -45,7 +71,12 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
         service_manager = ServiceManager()
         service_manager.restart_services()
         
-        access_url = f"http://{domain if domain else 'localhost'}:{port if port != '80' else ''}"
+        # Get actual server IP
+        server_ip = get_server_ip()
+        if domain:
+            access_url = f"http://{domain}" + (f":{port}" if port != '80' else "")
+        else:
+            access_url = f"http://{server_ip}" + (f":{port}" if port != '80' else "")
         
         print(f"✅ Deployment successful! Access URL: {access_url}")
         
