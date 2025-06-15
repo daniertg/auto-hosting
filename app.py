@@ -74,13 +74,39 @@ def deploy_laravel_project(git_repo, project_path, project_id, db_file, env_file
         }
         
     except Exception as e:
-        # Clean up on failure
-        if os.path.exists(project_path):
-            shutil.rmtree(project_path)
+        # HAPUS SEMUA JIKA GAGAL
+        cleanup_failed_deployment(project_path, project_id)
         return {'success': False, 'message': f'Deployment failed: {str(e)}'}
 
+def cleanup_failed_deployment(project_path, project_id):
+    """Hapus semua konfigurasi jika deployment gagal"""
+    try:
+        # Hapus folder project
+        if os.path.exists(project_path):
+            shutil.rmtree(project_path)
+        
+        # Hapus nginx config
+        nginx_config = f'/etc/nginx/sites-available/{project_id}'
+        nginx_enabled = f'/etc/nginx/sites-enabled/{project_id}'
+        
+        if os.path.exists(nginx_enabled):
+            os.remove(nginx_enabled)
+        if os.path.exists(nginx_config):
+            os.remove(nginx_config)
+        
+        # Hapus database
+        db_name = f"laravel_{project_id}"
+        subprocess.run(['mysql', '-e', f'DROP DATABASE IF EXISTS {db_name}'], check=False)
+        
+        # Restart nginx
+        subprocess.run(['systemctl', 'restart', 'nginx'], check=False)
+        
+        print(f"Cleaned up failed deployment: {project_id}")
+    except:
+        pass
+
 def setup_laravel(project_path, project_id, db_file, env_file):
-    # Remove lock file to avoid conflicts
+    # Remove lock file
     composer_lock = os.path.join(project_path, 'composer.lock')
     if os.path.exists(composer_lock):
         os.remove(composer_lock)
@@ -94,8 +120,8 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     # Handle .env file
     if env_file:
         env_file.save(os.path.join(project_path, '.env'))
+        fix_env_database_config(os.path.join(project_path, '.env'), project_id)
     else:
-        # Create basic .env
         create_basic_env(project_path, project_id)
     
     # Generate key
@@ -111,6 +137,27 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     subprocess.run(['php', 'artisan', 'config:clear'], cwd=project_path, check=False)
     subprocess.run(['php', 'artisan', 'cache:clear'], cwd=project_path, check=False)
     subprocess.run(['php', 'artisan', 'view:clear'], cwd=project_path, check=False)
+
+def fix_env_database_config(env_path, project_id):
+    """Fix database configuration in .env file"""
+    with open(env_path, 'r') as f:
+        content = f.read()
+    
+    # Replace problematic database hosts
+    content = content.replace('DB_HOST=db', 'DB_HOST=127.0.0.1')
+    content = content.replace('DB_HOST=mysql', 'DB_HOST=127.0.0.1')
+    content = content.replace('DB_HOST=database', 'DB_HOST=127.0.0.1')
+    content = content.replace('DB_HOST=localhost', 'DB_HOST=127.0.0.1')
+    
+    # Ensure correct database name
+    if 'DB_DATABASE=' in content:
+        import re
+        content = re.sub(r'DB_DATABASE=.*', f'DB_DATABASE=laravel_{project_id}', content)
+    else:
+        content += f'\nDB_DATABASE=laravel_{project_id}'
+    
+    with open(env_path, 'w') as f:
+        f.write(content)
 
 def create_basic_env(project_path, project_id):
     basic_env = f"""APP_NAME=Laravel

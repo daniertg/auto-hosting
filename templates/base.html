@@ -32,17 +32,17 @@
             <a class="navbar-brand" href="{{ url_for('index') }}">
                 <i class="fas fa-rocket"></i> Laravel Auto Hosting
             </a>
-            <div class="navbar-nav">
-                <a class="nav-link" href="{{ url_for('index') }}">Deploy</a>
-                <a class="nav-link" href="{{ url_for('list_projects') }}">Projects</a>
-            </div>
         </div>
     </nav>
 
     <div class="container mt-4">
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
                     <div class="alert alert-info alert-dismissible fade show" role="alert">
                         {{ message }}
                         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
