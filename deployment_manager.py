@@ -70,10 +70,23 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
         
         # Get actual server IP
         server_ip = get_server_ip()
+        
+        # Generate URLs and DNS info
         if domain:
             access_url = f"http://{domain}" + (f":{port}" if port != '80' else "")
+            dns_info = {
+                'domain': domain,
+                'server_ip': server_ip,
+                'dns_records': [
+                    {'type': 'A', 'name': '@', 'value': server_ip, 'ttl': '300'},
+                    {'type': 'A', 'name': 'www', 'value': server_ip, 'ttl': '300'}
+                ],
+                'nameservers': get_recommended_nameservers(),
+                'instructions': f"Set your domain '{domain}' to point to IP: {server_ip}"
+            }
         else:
             access_url = f"http://{server_ip}" + (f":{port}" if port != '80' else "")
+            dns_info = None
         
         print(f"✅ Deployment successful! Access URL: {access_url}")
         
@@ -82,7 +95,8 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
             'message': 'Project deployed successfully!',
             'project_id': project_id,
             'access_url': access_url,
-            'ssl_status': ssl_result
+            'ssl_status': ssl_result,
+            'dns_info': dns_info
         }
         
     except Exception as e:
@@ -114,3 +128,21 @@ def cleanup_failed_deployment(project_path, project_id):
         
     except Exception as e:
         print(f"⚠️ Cleanup error: {e}")
+
+def get_recommended_nameservers():
+    """Get recommended nameservers based on server provider"""
+    try:
+        # Try to detect server provider
+        result = subprocess.run(['curl', '-s', 'http://169.254.169.254/metadata/v1/vendor-data'], 
+                              capture_output=True, text=True, check=False)
+        
+        if 'digitalocean' in result.stdout.lower():
+            return ['ns1.digitalocean.com', 'ns2.digitalocean.com', 'ns3.digitalocean.com']
+        elif 'amazonaws' in result.stdout.lower():
+            return ['Route 53 DNS (AWS)', 'Use AWS Route 53 for DNS management']
+        else:
+            return ['Cloudflare: nash.ns.cloudflare.com, rima.ns.cloudflare.com', 
+                   'Or use your domain registrar nameservers']
+    except:
+        return ['Cloudflare: nash.ns.cloudflare.com, rima.ns.cloudflare.com', 
+               'Or use your domain registrar nameservers']

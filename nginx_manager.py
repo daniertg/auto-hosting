@@ -92,25 +92,40 @@ class NginxManager:
     def setup_ssl(self, domain):
         """Setup SSL certificate"""
         try:
-            subprocess.run(['certbot', '--nginx', '-d', domain, '--non-interactive', '--agree-tos', 
-                           '--email', 'admin@example.com'], check=True)
-            return "SSL certificate installed successfully"
-        except:
-            return "SSL installation failed"
-        """Clean up nginx configuration"""
-        nginx_config = f'/etc/nginx/sites-available/{project_id}'
-        nginx_enabled = f'/etc/nginx/sites-enabled/{project_id}'
-        
-        if os.path.exists(nginx_enabled):
-            os.remove(nginx_enabled)
-        if os.path.exists(nginx_config):
-            os.remove(nginx_config)
+            # First check if domain points to this server
+            server_ip = self._get_server_ip()
+            domain_ip = self._resolve_domain(domain)
+            
+            if domain_ip != server_ip:
+                return f"SSL failed: Domain {domain} points to {domain_ip}, but server IP is {server_ip}. Please update DNS first."
+            
+            # Install certbot if not exists
+            subprocess.run(['apt', 'install', '-y', 'certbot', 'python3-certbot-nginx'], check=False)
+            
+            # Try to get SSL certificate
+            result = subprocess.run(['certbot', '--nginx', '-d', domain, '--non-interactive', '--agree-tos', 
+                           '--email', 'admin@example.com'], capture_output=True, text=True, check=False)
+            
+            if result.returncode == 0:
+                return "SSL certificate installed successfully"
+            else:
+                return f"SSL installation failed: {result.stderr}"
+        except Exception as e:
+            return f"SSL installation failed: {str(e)}"
     
-    def setup_ssl(self, domain):
-        """Setup SSL certificate"""
+    def _get_server_ip(self):
+        """Get server public IP"""
         try:
-            subprocess.run(['certbot', '--nginx', '-d', domain, '--non-interactive', '--agree-tos', 
-                           '--email', 'admin@example.com'], check=True)
-            return "SSL certificate installed successfully"
+            import requests
+            response = requests.get('https://ifconfig.me', timeout=5)
+            return response.text.strip()
         except:
-            return "SSL installation failed"
+            return 'unknown'
+    
+    def _resolve_domain(self, domain):
+        """Resolve domain to IP"""
+        try:
+            import socket
+            return socket.gethostbyname(domain)
+        except:
+            return 'unresolved'
