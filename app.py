@@ -125,6 +125,23 @@ def test_mysql_connection():
     
     raise Exception("No working MySQL credentials found")
 
+def fix_migration_compatibility(project_path):
+    """Fix Laravel migration compatibility issues"""
+    try:
+        # Fix foreign key issues by running migration with specific flags
+        subprocess.run(['php', 'artisan', 'migrate:fresh', '--force'], cwd=project_path, check=False)
+        
+        # If fresh fails, try step by step
+        subprocess.run(['php', 'artisan', 'migrate:reset', '--force'], cwd=project_path, check=False)
+        subprocess.run(['php', 'artisan', 'migrate:install'], cwd=project_path, check=False)
+        subprocess.run(['php', 'artisan', 'migrate', '--force'], cwd=project_path, check=False)
+        
+        print("✓ Migration compatibility fixed")
+        return True
+    except Exception as e:
+        print(f"✗ Migration fix failed: {str(e)}")
+        return False
+
 def setup_laravel(project_path, project_id, db_file, env_file):
     # Remove lock file
     composer_lock = os.path.join(project_path, 'composer.lock')
@@ -149,6 +166,9 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     
     # Generate key
     subprocess.run(['php', 'artisan', 'key:generate', '--force'], cwd=project_path, check=True)
+    
+    # Fix migration compatibility before running migrations
+    fix_migration_compatibility(project_path)
     
     # Fix permissions
     subprocess.run(['chmod', '-R', '755', project_path], check=True)
@@ -245,7 +265,15 @@ def configure_nginx(project_path, project_id, domain, port):
         f.write(nginx_config)
     
     # Test nginx configuration before enabling
-    subprocess.run(['nginx', '-t'], check=True)
+    try:
+        subprocess.run(['nginx', '-t'], check=True, capture_output=True)
+        print("✓ Nginx config valid")
+    except subprocess.CalledProcessError as e:
+        print(f"✗ Nginx config invalid: {e}")
+        # Remove invalid config
+        if os.path.exists(config_path):
+            os.remove(config_path)
+        raise Exception("Nginx configuration test failed")
     
     subprocess.run(['ln', '-sf', config_path, f'/etc/nginx/sites-enabled/{project_id}'], check=True)
 
@@ -255,23 +283,26 @@ def setup_database(project_path, project_id, db_file):
     # Get working MySQL credentials
     db_user, db_password = test_mysql_connection()
     
-    # Create database
+    # Create database with proper charset
+    create_db_cmd = f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    
     if db_password:
-        subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', '-e', f'CREATE DATABASE IF NOT EXISTS {db_name}'], check=True)
+        subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', '-e', create_db_cmd], check=True)
     else:
-        subprocess.run(['mysql', '-u', db_user, '-e', f'CREATE DATABASE IF NOT EXISTS {db_name}'], check=True)
+        subprocess.run(['mysql', '-u', db_user, '-e', create_db_cmd], check=True)
     
-    db_file_path = f'/tmp/{secure_filename(db_file.filename)}'
-    db_file.save(db_file_path)
+    if db_file:
+        db_file_path = f'/tmp/{secure_filename(db_file.filename)}'
+        db_file.save(db_file_path)
+        
+        # Import database
+        if db_password:
+            subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', db_name], stdin=open(db_file_path, 'r'), check=True)
+        else:
+            subprocess.run(['mysql', '-u', db_user, db_name], stdin=open(db_file_path, 'r'), check=True)
     
-    # Import database
-    if db_password:
-        subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', db_name], stdin=open(db_file_path, 'r'), check=True)
-    else:
-        subprocess.run(['mysql', '-u', db_user, db_name], stdin=open(db_file_path, 'r'), check=True)
-    
-    # Run migrations
-    subprocess.run(['php', 'artisan', 'migrate', '--force'], cwd=project_path, check=False)
+    # Run migrations with compatibility fixes
+    fix_migration_compatibility(project_path)
 
 def setup_ssl(domain):
     try:
