@@ -90,19 +90,48 @@ def deploy_laravel_project(git_repo, project_path, project_id, db_file, env_file
         return {'success': False, 'message': f'Deployment failed: {str(e)}'}
 
 def setup_laravel(project_path, project_id, db_file, env_file):
-    # Install dependencies
-    subprocess.run(['composer', 'install', '--no-dev', '--optimize-autoloader'], 
-                  cwd=project_path, check=True)
+    # Check PHP version and handle compatibility
+    try:
+        php_version = subprocess.check_output(['php', '-v']).decode('utf-8')
+        print(f"PHP Version: {php_version.split()[1]}")
+    except:
+        pass
+    
+    # Remove composer.lock to avoid version conflicts
+    composer_lock = os.path.join(project_path, 'composer.lock')
+    if os.path.exists(composer_lock):
+        os.remove(composer_lock)
+        print("Removed composer.lock to avoid version conflicts")
+    
+    # Update composer.json to be compatible with PHP 8.1
+    fix_composer_compatibility(project_path)
+    
+    # Install dependencies with update to resolve conflicts
+    try:
+        # First try composer install
+        subprocess.run(['composer', 'install', '--no-dev', '--optimize-autoloader', '--no-interaction'], 
+                      cwd=project_path, check=True, env={'COMPOSER_ALLOW_SUPERUSER': '1'})
+    except subprocess.CalledProcessError:
+        print("Composer install failed, trying composer update...")
+        # If install fails, try update to resolve dependencies
+        subprocess.run(['composer', 'update', '--no-dev', '--optimize-autoloader', '--no-interaction'], 
+                      cwd=project_path, check=True, env={'COMPOSER_ALLOW_SUPERUSER': '1'})
     
     # Handle .env file
     if env_file:
         env_file.save(os.path.join(project_path, '.env'))
     else:
         # Copy .env.example to .env
-        subprocess.run(['cp', '.env.example', '.env'], cwd=project_path, check=True)
+        env_example = os.path.join(project_path, '.env.example')
+        env_target = os.path.join(project_path, '.env')
+        if os.path.exists(env_example):
+            subprocess.run(['cp', '.env.example', '.env'], cwd=project_path, check=True)
+        else:
+            # Create basic .env if .env.example doesn't exist
+            create_basic_env(project_path)
     
     # Generate application key
-    subprocess.run(['php', 'artisan', 'key:generate'], cwd=project_path, check=True)
+    subprocess.run(['php', 'artisan', 'key:generate', '--force'], cwd=project_path, check=True)
     
     # Fix file permissions
     subprocess.run(['chmod', '-R', '755', project_path], check=True)
@@ -114,6 +143,91 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     
     # Fix path issues for Windows/Linux compatibility
     fix_asset_paths(project_path)
+
+def fix_composer_compatibility(project_path):
+    """Fix composer.json to be compatible with PHP 8.1"""
+    composer_json_path = os.path.join(project_path, 'composer.json')
+    
+    if os.path.exists(composer_json_path):
+        with open(composer_json_path, 'r') as f:
+            composer_data = json.load(f)
+        
+        # Update PHP requirement to be compatible with 8.1
+        if 'require' in composer_data:
+            if 'php' in composer_data['require']:
+                # Change PHP requirement to support 8.1
+                composer_data['require']['php'] = '^8.1'
+                print("Updated PHP requirement to ^8.1")
+            
+            # Update problematic packages to versions compatible with PHP 8.1
+            problematic_packages = {
+                'symfony/css-selector': '^6.0',
+                'symfony/event-dispatcher': '^6.0', 
+                'symfony/string': '^6.0',
+                'symfony/console': '^6.0',
+                'symfony/process': '^6.0',
+                'symfony/http-kernel': '^6.0',
+                'symfony/routing': '^6.0'
+            }
+            
+            for package, version in problematic_packages.items():
+                if package in composer_data['require']:
+                    composer_data['require'][package] = version
+                    print(f"Updated {package} to {version}")
+        
+        # Save updated composer.json
+        with open(composer_json_path, 'w') as f:
+            json.dump(composer_data, f, indent=4)
+        
+        print("Updated composer.json for PHP 8.1 compatibility")
+
+def create_basic_env(project_path):
+    """Create a basic .env file"""
+    basic_env = """APP_NAME=Laravel
+APP_ENV=production
+APP_KEY=
+APP_DEBUG=false
+APP_URL=http://localhost
+
+LOG_CHANNEL=stack
+LOG_DEPRECATIONS_CHANNEL=null
+LOG_LEVEL=debug
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=laravel
+DB_USERNAME=root
+DB_PASSWORD=
+
+BROADCAST_DRIVER=log
+CACHE_DRIVER=file
+FILESYSTEM_DRIVER=local
+QUEUE_CONNECTION=sync
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+
+MEMCACHED_HOST=127.0.0.1
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+
+MAIL_MAILER=smtp
+MAIL_HOST=mailhog
+MAIL_PORT=1025
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+MAIL_FROM_ADDRESS=null
+MAIL_FROM_NAME="${APP_NAME}"
+"""
+    
+    env_path = os.path.join(project_path, '.env')
+    with open(env_path, 'w') as f:
+        f.write(basic_env)
+    
+    print("Created basic .env file")
 
 def fix_asset_paths(project_path):
     # Create a helper script to fix asset paths
@@ -152,7 +266,7 @@ server {{
     }}
 
     location ~ \\.php$ {{
-        fastcgi_pass unix:/var/run/php/php8.1-fpm.sock;
+        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
         include fastcgi_params;
@@ -215,7 +329,7 @@ def setup_ssl(domain):
 
 def restart_services():
     subprocess.run(['systemctl', 'restart', 'nginx'], check=True)
-    subprocess.run(['systemctl', 'restart', 'php8.1-fpm'], check=True)
+    subprocess.run(['systemctl', 'restart', 'php8.2-fpm'], check=True)
 
 @app.route('/projects')
 def list_projects():
