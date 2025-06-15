@@ -2,7 +2,7 @@ import subprocess
 import os
 
 class NginxManager:
-    def configure_nginx(self, project_path, project_id, domain, port):
+    def configure_nginx(self, project_path, project_name, domain, port):
         """Configure Nginx for project"""
         # Get PHP socket from service manager
         from service_manager import ServiceManager
@@ -12,27 +12,32 @@ class NginxManager:
         # Remove conflicting configs first
         self._fix_nginx_conflicts()
         
+        # Remove existing config for this port (if any)
+        self.cleanup_config(project_name)
+        
         # Create nginx config
-        nginx_config = self._generate_nginx_config(project_path, project_id, domain, port, php_socket)
+        nginx_config = self._generate_nginx_config(project_path, project_name, domain, port, php_socket)
         
         # Write config file
-        config_path = f'/etc/nginx/sites-available/{project_id}'
+        config_path = f'/etc/nginx/sites-available/{project_name}'
         with open(config_path, 'w') as f:
             f.write(nginx_config)
         
         # Enable the config
-        subprocess.run(['ln', '-sf', config_path, f'/etc/nginx/sites-enabled/{project_id}'], check=True)
+        subprocess.run(['ln', '-sf', config_path, f'/etc/nginx/sites-enabled/{project_name}'], check=True)
         
         # Test nginx configuration
-        self._test_nginx_config(project_id, config_path)
+        self._test_nginx_config(project_name, config_path)
         
-        print("✅ Nginx configured successfully")
-    
-    def _generate_nginx_config(self, project_path, project_id, domain, port, php_socket):
+        print(f"✅ Nginx configured successfully for port {port}")
+
+    def _generate_nginx_config(self, project_path, project_name, domain, port, php_socket):
         """Generate nginx configuration"""
+        server_name = domain if domain else f'localhost'
+        
         return f"""server {{
     listen {port};
-    server_name {domain if domain else f'site-{project_id}'};
+    server_name {server_name};
     root {project_path}/public;
     index index.php index.html index.htm;
 
@@ -81,15 +86,17 @@ class NginxManager:
                 os.remove(site)
                 print(f"✅ Removed conflicting site: {site}")
     
-    def cleanup_config(self, project_id):
+    def cleanup_config(self, project_name):
         """Clean up nginx configuration"""
-        nginx_config = f'/etc/nginx/sites-available/{project_id}'
-        nginx_enabled = f'/etc/nginx/sites-enabled/{project_id}'
+        nginx_config = f'/etc/nginx/sites-available/{project_name}'
+        nginx_enabled = f'/etc/nginx/sites-enabled/{project_name}'
         
         if os.path.exists(nginx_enabled):
             os.remove(nginx_enabled)
+            print(f"✓ Removed nginx enabled config: {nginx_enabled}")
         if os.path.exists(nginx_config):
             os.remove(nginx_config)
+            print(f"✓ Removed nginx available config: {nginx_config}")
     
     def setup_ssl(self, domain):
         """Setup SSL certificate"""

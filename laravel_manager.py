@@ -7,7 +7,7 @@ class LaravelManager:
     def __init__(self):
         self.db_manager = DatabaseManager()
     
-    def setup_laravel(self, project_path, project_id, db_file, env_file):
+    def setup_laravel(self, project_path, project_name, db_file, env_file):
         """Setup Laravel project"""
         # Remove lock file
         composer_lock = os.path.join(project_path, 'composer.lock')
@@ -19,7 +19,7 @@ class LaravelManager:
         
         # Setup .env file
         db_user, db_password = self.db_manager.get_credentials()
-        self._setup_env_file(project_path, project_id, env_file, db_user, db_password)
+        self._setup_env_file(project_path, project_name, env_file, db_user, db_password)
         
         # Generate application key
         subprocess.run(['php', 'artisan', 'key:generate', '--force'], cwd=project_path, check=True)
@@ -49,15 +49,15 @@ class LaravelManager:
             '--ignore-platform-reqs'
         ], cwd=project_path, check=True, env=env)
     
-    def _setup_env_file(self, project_path, project_id, env_file, db_user, db_password):
+    def _setup_env_file(self, project_path, project_name, env_file, db_user, db_password):
         """Setup .env file"""
         if env_file:
             env_file.save(os.path.join(project_path, '.env'))
-            self._fix_env_database_config(os.path.join(project_path, '.env'), project_id, db_user, db_password)
+            self._fix_env_database_config(os.path.join(project_path, '.env'), project_name, db_user, db_password)
         else:
-            self._create_basic_env(project_path, project_id, db_user, db_password)
+            self._create_basic_env(project_path, project_name, db_user, db_password)
     
-    def _fix_env_database_config(self, env_path, project_id, db_user, db_password):
+    def _fix_env_database_config(self, env_path, project_name, db_user, db_password):
         """Fix database configuration in .env file"""
         with open(env_path, 'r') as f:
             content = f.read()
@@ -69,13 +69,14 @@ class LaravelManager:
         content = content.replace('DB_HOST=localhost', 'DB_HOST=127.0.0.1')
         
         # Update database credentials
-        content = re.sub(r'DB_DATABASE=.*', f'DB_DATABASE=laravel_{project_id}', content)
+        import re
+        content = re.sub(r'DB_DATABASE=.*', f'DB_DATABASE=laravel_{project_name}', content)
         content = re.sub(r'DB_USERNAME=.*', f'DB_USERNAME={db_user}', content)
         content = re.sub(r'DB_PASSWORD=.*', f'DB_PASSWORD={db_password}', content)
         
         # Add missing config if not present
         if 'DB_DATABASE=' not in content:
-            content += f'\nDB_DATABASE=laravel_{project_id}'
+            content += f'\nDB_DATABASE=laravel_{project_name}'
         if 'DB_USERNAME=' not in content:
             content += f'\nDB_USERNAME={db_user}'
         if 'DB_PASSWORD=' not in content:
@@ -83,8 +84,8 @@ class LaravelManager:
         
         with open(env_path, 'w') as f:
             f.write(content)
-    
-    def _create_basic_env(self, project_path, project_id, db_user, db_password):
+
+    def _create_basic_env(self, project_path, project_name, db_user, db_password):
         """Create basic .env file"""
         basic_env = f"""APP_NAME=Laravel
 APP_ENV=production
@@ -95,7 +96,7 @@ APP_URL=http://localhost
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_DATABASE=laravel_{project_id}
+DB_DATABASE=laravel_{project_name}
 DB_USERNAME={db_user}
 DB_PASSWORD={db_password}
 

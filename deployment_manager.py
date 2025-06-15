@@ -28,11 +28,17 @@ def get_server_ip():
 
 def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
     """Main deployment function"""
-    project_id = str(uuid.uuid4())[:8]
-    project_path = f"/var/www/{project_id}"
+    # Use port as project identifier
+    project_name = f"port_{port}"
+    project_path = f"/var/www/{project_name}"
     
     try:
-        print(f"🚀 Starting deployment for project: {project_id}")
+        print(f"🚀 Starting deployment for project on port: {port}")
+        
+        # Check if project already exists on this port - clean up first
+        if os.path.exists(project_path):
+            print(f"⚠️ Project already exists on port {port}, replacing...")
+            cleanup_existing_project(project_name)
         
         # Stop Apache to free port 80
         subprocess.run(['systemctl', 'stop', 'apache2'], check=False)
@@ -45,17 +51,17 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
         # 2. Setup database
         print("🗄️ Setting up database...")
         db_manager = DatabaseManager()
-        db_manager.setup_database(project_id, db_file)
+        db_manager.setup_database(project_name, db_file)
         
         # 3. Setup Laravel
         print("⚙️ Setting up Laravel...")
         laravel_manager = LaravelManager()
-        laravel_manager.setup_laravel(project_path, project_id, db_file, env_file)
+        laravel_manager.setup_laravel(project_path, project_name, db_file, env_file)
         
         # 4. Configure Nginx
         print("🌐 Configuring Nginx...")
         nginx_manager = NginxManager()
-        nginx_manager.configure_nginx(project_path, project_id, domain, port)
+        nginx_manager.configure_nginx(project_path, project_name, domain, port)
         
         # 5. Setup SSL if domain provided
         ssl_result = ""
@@ -93,7 +99,8 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
         return {
             'success': True,
             'message': 'Project deployed successfully!',
-            'project_id': project_id,
+            'project_name': project_name,
+            'port': port,
             'access_url': access_url,
             'ssl_status': ssl_result,
             'dns_info': dns_info
@@ -101,13 +108,13 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
         
     except Exception as e:
         print(f"❌ Deployment failed: {str(e)}")
-        cleanup_failed_deployment(project_path, project_id)
+        cleanup_failed_deployment(project_path, project_name)
         return {'success': False, 'message': f'Deployment failed: {str(e)}'}
 
-def cleanup_failed_deployment(project_path, project_id):
+def cleanup_failed_deployment(project_path, project_name):
     """Clean up failed deployment"""
     try:
-        print(f"🧹 Cleaning up failed deployment: {project_id}")
+        print(f"🧹 Cleaning up failed deployment: {project_name}")
         
         # Remove project folder
         if os.path.exists(project_path):
@@ -115,16 +122,43 @@ def cleanup_failed_deployment(project_path, project_id):
         
         # Clean up nginx config
         nginx_manager = NginxManager()
-        nginx_manager.cleanup_config(project_id)
+        nginx_manager.cleanup_config(project_name)
         
         # Clean up database
         db_manager = DatabaseManager()
-        db_manager.cleanup_database(project_id)
+        db_manager.cleanup_database(project_name)
         
-        print(f"✅ Cleanup completed for: {project_id}")
+        print(f"✅ Cleanup completed for: {project_name}")
         
     except Exception as e:
         print(f"⚠️ Cleanup error: {e}")
+
+def cleanup_existing_project(project_name):
+    """Clean up existing project on same port"""
+    try:
+        print(f"🧹 Cleaning up existing project: {project_name}")
+        
+        project_path = f"/var/www/{project_name}"
+        
+        # Remove project folder
+        if os.path.exists(project_path):
+            shutil.rmtree(project_path)
+            print(f"✓ Removed project folder: {project_path}")
+        
+        # Clean up nginx config
+        nginx_manager = NginxManager()
+        nginx_manager.cleanup_config(project_name)
+        print(f"✓ Cleaned nginx config for: {project_name}")
+        
+        # Clean up database
+        db_manager = DatabaseManager()
+        db_manager.cleanup_database(project_name)
+        print(f"✓ Cleaned database for: {project_name}")
+        
+        # Reload nginx after cleanup
+        subprocess.run(['systemctl', 'reload', 'nginx'], check=False)
+        
+        print(f"✅ Cleanup completed for: {project_name}")
         
     except Exception as e:
         print(f"⚠️ Cleanup error: {e}")

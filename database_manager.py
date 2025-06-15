@@ -26,13 +26,15 @@ class DatabaseManager:
         
         raise Exception("No working MySQL credentials found")
     
-    def setup_database(self, project_id, db_file):
+    def setup_database(self, project_name, db_file):
         """Setup database for project"""
-        db_name = f"laravel_{project_id}"
+        db_name = f"laravel_{project_name}"
         
-        # Drop database if exists (clean slate)
+        # Drop existing database first (for port replacement)
+        print(f"🗄️ Setting up database: {db_name}")
         drop_db_cmd = f"DROP DATABASE IF EXISTS {db_name};"
         self._execute_mysql_command(drop_db_cmd)
+        print(f"✓ Cleaned existing database: {db_name}")
         
         # Create database with proper charset
         create_db_cmd = f"CREATE DATABASE {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
@@ -44,9 +46,9 @@ class DatabaseManager:
         
         print(f"✅ Database {db_name} ready")
     
-    def cleanup_database(self, project_id):
+    def cleanup_database(self, project_name):
         """Clean up database for project"""
-        db_name = f"laravel_{project_id}"
+        db_name = f"laravel_{project_name}"
         drop_db_cmd = f"DROP DATABASE IF EXISTS {db_name};"
         self._execute_mysql_command(drop_db_cmd, check=False)
     
