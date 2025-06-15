@@ -2,6 +2,26 @@ import subprocess
 import os
 
 class NginxManager:
+    def __init__(self):
+        self.php_socket = self._detect_php_socket()
+    
+    def _detect_php_socket(self):
+        """Detect available PHP-FPM socket"""
+        possible_sockets = [
+            '/var/run/php/php8.2-fpm.sock',
+            '/var/run/php/php8.1-fpm.sock', 
+            '/var/run/php/php8.0-fpm.sock',
+            '/var/run/php/php7.4-fpm.sock'
+        ]
+        
+        for socket in possible_sockets:
+            if os.path.exists(socket):
+                print(f"✅ Found PHP socket: {socket}")
+                return socket
+        
+        # Fallback to most common
+        return '/var/run/php/php8.1-fpm.sock'
+    
     def configure_nginx(self, project_path, project_id, domain, port):
         """Configure Nginx for project"""
         # Remove conflicting configs first
@@ -36,7 +56,7 @@ class NginxManager:
     }}
 
     location ~ \\.php$ {{
-        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+        fastcgi_pass unix:{self.php_socket};
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
         include fastcgi_params;
