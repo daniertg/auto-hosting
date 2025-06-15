@@ -15,9 +15,16 @@ apt install -y software-properties-common
 add-apt-repository ppa:ondrej/php -y
 apt update
 
-# Install packages
+# Install packages - Force PHP 8.2 to be the default
 apt install -y nginx php8.2 php8.2-fpm php8.2-mysql php8.2-xml php8.2-gd php8.2-curl php8.2-zip php8.2-mbstring php8.2-bcmath php8.2-intl
 apt install -y mysql-server git python3 python3-pip
+
+# Remove other PHP versions to avoid conflicts
+apt remove -y php8.1 php8.1-fpm php7.4 php7.4-fpm 2>/dev/null || true
+
+# Set PHP 8.2 as default
+update-alternatives --install /usr/bin/php php /usr/bin/php8.2 82
+update-alternatives --set php /usr/bin/php8.2
 
 # Install Composer
 curl -sS https://getcomposer.org/installer | php
@@ -52,13 +59,24 @@ else
     echo "✓ Created alternative laravel user"
 fi
 
-# Start services
-systemctl enable nginx php8.2-fpm
-systemctl start nginx php8.2-fpm
+# Start services - Explicitly enable and start PHP 8.2
+systemctl stop php8.1-fpm 2>/dev/null || true
+systemctl disable php8.1-fpm 2>/dev/null || true
+systemctl enable php8.2-fpm
+systemctl start php8.2-fpm
+systemctl enable nginx
+systemctl start nginx
 
 # Ensure Nginx is running on port 80
 systemctl restart nginx
 echo "✓ Nginx restarted and should be on port 80"
+
+# Verify PHP 8.2 FPM is running
+if systemctl is-active --quiet php8.2-fpm; then
+    echo "✓ PHP 8.2 FPM is running"
+else
+    echo "✗ PHP 8.2 FPM failed to start"
+fi
 
 # Create web directory
 mkdir -p /var/www

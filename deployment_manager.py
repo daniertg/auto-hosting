@@ -11,7 +11,6 @@ from service_manager import ServiceManager
 def get_server_ip():
     """Get server public IP address"""
     try:
-        # Try to get public IP
         response = requests.get('https://ifconfig.me', timeout=5)
         if response.status_code == 200:
             return response.text.strip()
@@ -19,14 +18,12 @@ def get_server_ip():
         pass
     
     try:
-        # Alternative method
         response = requests.get('https://api.ipify.org', timeout=5)
         if response.status_code == 200:
             return response.text.strip()
     except:
         pass
     
-    # Fallback to localhost
     return 'localhost'
 
 def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
@@ -111,6 +108,9 @@ def cleanup_failed_deployment(project_path, project_id):
         db_manager.cleanup_database(project_id)
         
         print(f"✅ Cleanup completed for: {project_id}")
+        
+    except Exception as e:
+        print(f"⚠️ Cleanup error: {e}")
         
     except Exception as e:
         print(f"⚠️ Cleanup error: {e}")

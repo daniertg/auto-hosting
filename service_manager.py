@@ -3,56 +3,44 @@ import os
 
 class ServiceManager:
     def __init__(self):
-        self.php_service = self._detect_php_service()
-    
-    def _detect_php_service(self):
-        """Detect correct PHP-FPM service name"""
-        possible_services = [
-            'php8.2-fpm',
-            'php-fpm8.2', 
-            'php-fpm',
-            'php8.1-fpm',
-            'php7.4-fpm'
-        ]
-        
-        for service in possible_services:
-            try:
-                result = subprocess.run(['systemctl', 'list-units', '--type=service', '--all'], 
-                                      capture_output=True, text=True, check=False)
-                if service in result.stdout:
-                    print(f"✅ Found PHP service: {service}")
-                    return service
-            except:
-                continue
-        
-        print("⚠️ No PHP-FPM service found, will try to install")
-        return 'php8.2-fpm'
+        self.php_service = 'php8.2-fpm'  # Force PHP 8.2
     
     def restart_services(self):
         """Restart system services"""
-        # Stop Apache first to free port 80
         self._stop_apache()
-        self._install_php_fpm_if_missing()
+        self._stop_conflicting_php()
+        self._ensure_php82_installed()
         self._manage_php_fpm()
         self._manage_nginx()
         print("✅ Services restarted successfully")
     
-    def _install_php_fpm_if_missing(self):
-        """Install PHP-FPM if missing"""
+    def _stop_conflicting_php(self):
+        """Stop other PHP versions"""
+        conflicting_services = ['php8.1-fpm', 'php7.4-fpm', 'php8.0-fpm']
+        
+        for service in conflicting_services:
+            try:
+                subprocess.run(['systemctl', 'stop', service], check=False)
+                subprocess.run(['systemctl', 'disable', service], check=False)
+                print(f"✅ Stopped conflicting service: {service}")
+            except:
+                pass
+    
+    def _ensure_php82_installed(self):
+        """Ensure PHP 8.2 FPM is installed"""
         try:
-            # Check if service exists
-            result = subprocess.run(['systemctl', 'status', self.php_service], 
+            result = subprocess.run(['systemctl', 'status', 'php8.2-fpm'], 
                                   capture_output=True, check=False)
             
             if result.returncode != 0:
-                print("📦 Installing PHP-FPM...")
+                print("📦 Installing PHP 8.2 FPM...")
                 subprocess.run(['apt', 'update'], check=False)
                 subprocess.run(['apt', 'install', '-y', 'php8.2-fpm'], check=True)
                 subprocess.run(['systemctl', 'enable', 'php8.2-fpm'], check=True)
-                print("✅ PHP-FPM installed")
+                print("✅ PHP 8.2 FPM installed")
                 
         except Exception as e:
-            print(f"⚠️ Could not install PHP-FPM: {e}")
+            print(f"⚠️ Could not ensure PHP 8.2 FPM: {e}")
     
     def _manage_php_fpm(self):
         """Manage PHP-FPM service"""
@@ -77,12 +65,36 @@ class ServiceManager:
                 else:
                     print(f"❌ {self.php_service} restart failed: {result.stderr}")
                     raise Exception(f"Could not start {self.php_service}")
+            
+            # Wait for socket creation and fix permissions
+            import time
+            time.sleep(3)
+            self._fix_socket_permissions()
                 
         except Exception as e:
             print(f"⚠️ PHP-FPM management failed: {e}")
-            # Try alternative approach
-            subprocess.run(['pkill', '-f', 'php-fpm'], check=False)
-            subprocess.run(['systemctl', 'start', 'php8.2-fpm'], check=False)
+    
+    def _fix_socket_permissions(self):
+        """Fix socket permissions specifically"""
+        socket_path = '/var/run/php/php8.2-fpm.sock'
+        
+        if os.path.exists(socket_path):
+            subprocess.run(['chmod', '666', socket_path], check=False)
+            subprocess.run(['chown', 'www-data:www-data', socket_path], check=False)
+            print(f"✅ Fixed permissions for {socket_path}")
+            
+            # Test socket is writable
+            try:
+                result = subprocess.run(['sudo', '-u', 'www-data', 'test', '-w', socket_path], 
+                                      check=False)
+                if result.returncode == 0:
+                    print(f"✅ Socket {socket_path} is writable by www-data")
+                else:
+                    print(f"⚠️ Socket {socket_path} not writable by www-data")
+            except:
+                pass
+        else:
+            print(f"⚠️ Socket {socket_path} not found")
     
     def _fix_php_fpm_issues(self):
         """Fix common PHP-FPM issues"""
@@ -122,6 +134,23 @@ class ServiceManager:
                 result = subprocess.run(['systemctl', 'reload', 'nginx'], 
                                        capture_output=True, text=True, check=False)
                 if result.returncode == 0:
+                    print("✅ Nginx reloaded successfully")
+                    return
+            
+            # Start nginx
+            result = subprocess.run(['systemctl', 'start', 'nginx'], 
+                                   capture_output=True, text=True, check=False)
+            
+            if result.returncode == 0:
+                print("✅ Nginx started successfully")
+            else:
+                # Try restart
+                subprocess.run(['systemctl', 'restart', 'nginx'], check=True)
+                print("✅ Nginx restarted successfully")
+                
+        except Exception as e:
+            print(f"⚠️ Nginx management failed: {e}")
+            if result.returncode == 0:
                     print("✅ Nginx reloaded successfully")
                     return
             

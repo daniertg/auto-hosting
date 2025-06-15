@@ -3,24 +3,7 @@ import os
 
 class NginxManager:
     def __init__(self):
-        self.php_socket = self._detect_php_socket()
-    
-    def _detect_php_socket(self):
-        """Detect available PHP-FPM socket"""
-        possible_sockets = [
-            '/var/run/php/php8.2-fpm.sock',
-            '/var/run/php/php8.1-fpm.sock', 
-            '/var/run/php/php8.0-fpm.sock',
-            '/var/run/php/php7.4-fpm.sock'
-        ]
-        
-        for socket in possible_sockets:
-            if os.path.exists(socket):
-                print(f"✅ Found PHP socket: {socket}")
-                return socket
-        
-        # Fallback to most common
-        return '/var/run/php/php8.1-fpm.sock'
+        self.php_socket = '/var/run/php/php8.2-fpm.sock'  # Force PHP 8.2 socket
     
     def configure_nginx(self, project_path, project_id, domain, port):
         """Configure Nginx for project"""
@@ -72,7 +55,7 @@ class NginxManager:
         try_files $uri =404;
     }}
 }}"""
-    
+
     def _test_nginx_config(self, project_id, config_path):
         """Test nginx configuration"""
         try:
@@ -97,6 +80,23 @@ class NginxManager:
                 print(f"✅ Removed conflicting site: {site}")
     
     def cleanup_config(self, project_id):
+        """Clean up nginx configuration"""
+        nginx_config = f'/etc/nginx/sites-available/{project_id}'
+        nginx_enabled = f'/etc/nginx/sites-enabled/{project_id}'
+        
+        if os.path.exists(nginx_enabled):
+            os.remove(nginx_enabled)
+        if os.path.exists(nginx_config):
+            os.remove(nginx_config)
+    
+    def setup_ssl(self, domain):
+        """Setup SSL certificate"""
+        try:
+            subprocess.run(['certbot', '--nginx', '-d', domain, '--non-interactive', '--agree-tos', 
+                           '--email', 'admin@example.com'], check=True)
+            return "SSL certificate installed successfully"
+        except:
+            return "SSL installation failed"
         """Clean up nginx configuration"""
         nginx_config = f'/etc/nginx/sites-available/{project_id}'
         nginx_enabled = f'/etc/nginx/sites-enabled/{project_id}'
