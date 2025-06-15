@@ -79,3 +79,84 @@
     </div>
 </div>
 {% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('deployForm').onsubmit = function(e) {
+    e.preventDefault();
+    
+    const deployButton = this.querySelector('button[type="submit"]');
+    const deploymentStatus = document.getElementById('deploymentStatus');
+    const deploymentResult = document.getElementById('deploymentResult');
+    const progressBar = deploymentStatus.querySelector('.progress-bar');
+    
+    // Show loading state
+    deployButton.disabled = true;
+    deployButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deploying...';
+    deploymentStatus.style.display = 'block';
+    deploymentResult.innerHTML = '';
+    
+    // Simulate progress
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress > 90) progress = 90;
+        progressBar.style.width = progress + '%';
+    }, 1000);
+    
+    // Submit form
+    const formData = new FormData(this);
+    
+    fetch('/deploy', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        clearInterval(progressInterval);
+        progressBar.style.width = '100%';
+        
+        setTimeout(() => {
+            deploymentStatus.style.display = 'none';
+            
+            if (data.success) {
+                deploymentResult.innerHTML = `
+                    <div class="alert alert-success">
+                        <h5><i class="fas fa-check-circle"></i> Deployment Successful!</h5>
+                        <p><strong>Project ID:</strong> ${data.project_id}</p>
+                        <p><strong>Access URL:</strong> <a href="${data.access_url}" target="_blank">${data.access_url}</a></p>
+                        ${data.ssl_status ? `<p><strong>SSL Status:</strong> ${data.ssl_status}</p>` : ''}
+                        <hr>
+                        <p class="mb-0"><i class="fas fa-info-circle"></i> Your Laravel project is now live!</p>
+                    </div>
+                `;
+            } else {
+                deploymentResult.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h5><i class="fas fa-exclamation-triangle"></i> Deployment Failed</h5>
+                        <p>${data.message}</p>
+                    </div>
+                `;
+            }
+            
+            // Reset form
+            deployButton.disabled = false;
+            deployButton.innerHTML = '<i class="fas fa-rocket"></i> Deploy Project';
+            progressBar.style.width = '0%';
+        }, 1000);
+    })
+    .catch(error => {
+        clearInterval(progressInterval);
+        deploymentStatus.style.display = 'none';
+        deploymentResult.innerHTML = `
+            <div class="alert alert-danger">
+                <h5><i class="fas fa-exclamation-triangle"></i> Error</h5>
+                <p>An error occurred during deployment: ${error.message}</p>
+            </div>
+        `;
+        deployButton.disabled = false;
+        deployButton.innerHTML = '<i class="fas fa-rocket"></i> Deploy Project';
+    });
+};
+</script>
+{% endblock %}
