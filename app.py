@@ -90,32 +90,31 @@ def deploy_laravel_project(git_repo, project_path, project_id, db_file, env_file
         return {'success': False, 'message': f'Deployment failed: {str(e)}'}
 
 def setup_laravel(project_path, project_id, db_file, env_file):
-    # Check PHP version and handle compatibility
-    try:
-        php_version = subprocess.check_output(['php', '-v']).decode('utf-8')
-        print(f"PHP Version: {php_version.split()[1]}")
-    except:
-        pass
-    
     # Remove composer.lock to avoid version conflicts
     composer_lock = os.path.join(project_path, 'composer.lock')
     if os.path.exists(composer_lock):
         os.remove(composer_lock)
         print("Removed composer.lock to avoid version conflicts")
     
-    # Update composer.json to be compatible with PHP 8.1
+    # Fix composer.json for PHP compatibility
     fix_composer_compatibility(project_path)
     
-    # Install dependencies with update to resolve conflicts
+    # Set environment for Composer
+    composer_env = os.environ.copy()
+    composer_env['COMPOSER_ALLOW_SUPERUSER'] = '1'
+    
+    # Try composer update instead of install to resolve dependency conflicts
     try:
-        # First try composer install
-        subprocess.run(['composer', 'install', '--no-dev', '--optimize-autoloader', '--no-interaction'], 
-                      cwd=project_path, check=True, env={'COMPOSER_ALLOW_SUPERUSER': '1'})
-    except subprocess.CalledProcessError:
-        print("Composer install failed, trying composer update...")
-        # If install fails, try update to resolve dependencies
+        print("Running composer update to resolve dependencies...")
         subprocess.run(['composer', 'update', '--no-dev', '--optimize-autoloader', '--no-interaction'], 
-                      cwd=project_path, check=True, env={'COMPOSER_ALLOW_SUPERUSER': '1'})
+                      cwd=project_path, check=True, env=composer_env)
+    except subprocess.CalledProcessError as e:
+        print(f"Composer update failed: {e}")
+        # Fallback: try with --ignore-platform-reqs
+        print("Trying with --ignore-platform-reqs...")
+        subprocess.run(['composer', 'update', '--no-dev', '--optimize-autoloader', 
+                       '--no-interaction', '--ignore-platform-reqs'], 
+                      cwd=project_path, check=True, env=composer_env)
     
     # Handle .env file
     if env_file:
@@ -145,35 +144,41 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     fix_asset_paths(project_path)
 
 def fix_composer_compatibility(project_path):
-    """Fix composer.json to be compatible with PHP 8.1"""
+    """Fix composer.json to be compatible with current PHP version"""
     composer_json_path = os.path.join(project_path, 'composer.json')
     
     if os.path.exists(composer_json_path):
         with open(composer_json_path, 'r') as f:
             composer_data = json.load(f)
         
-        # Update PHP requirement to be compatible with 8.1
+        # Update PHP requirement to support current version
         if 'require' in composer_data:
             if 'php' in composer_data['require']:
-                # Change PHP requirement to support 8.1
-                composer_data['require']['php'] = '^8.1'
-                print("Updated PHP requirement to ^8.1")
+                composer_data['require']['php'] = '^8.1|^8.2'
+                print("Updated PHP requirement to ^8.1|^8.2")
             
-            # Update problematic packages to versions compatible with PHP 8.1
-            problematic_packages = {
+            # Downgrade Symfony packages to PHP 8.1 compatible versions
+            symfony_downgrades = {
                 'symfony/css-selector': '^6.0',
-                'symfony/event-dispatcher': '^6.0', 
+                'symfony/event-dispatcher': '^6.0',
                 'symfony/string': '^6.0',
                 'symfony/console': '^6.0',
                 'symfony/process': '^6.0',
                 'symfony/http-kernel': '^6.0',
-                'symfony/routing': '^6.0'
+                'symfony/routing': '^6.0',
+                'symfony/http-foundation': '^6.0',
+                'symfony/finder': '^6.0',
+                'symfony/var-dumper': '^6.0'
             }
             
-            for package, version in problematic_packages.items():
+            updated = []
+            for package, version in symfony_downgrades.items():
                 if package in composer_data['require']:
                     composer_data['require'][package] = version
-                    print(f"Updated {package} to {version}")
+                    updated.append(package)
+            
+            if updated:
+                print(f"Downgraded packages for PHP 8.1: {', '.join(updated)}")
         
         # Save updated composer.json
         with open(composer_json_path, 'w') as f:
