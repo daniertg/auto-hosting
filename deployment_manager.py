@@ -111,28 +111,6 @@ def deploy_laravel_project(git_repo, db_file, env_file, domain, port):
         cleanup_failed_deployment(project_path, project_name)
         return {'success': False, 'message': f'Deployment failed: {str(e)}'}
 
-def cleanup_failed_deployment(project_path, project_name):
-    """Clean up failed deployment"""
-    try:
-        print(f"🧹 Cleaning up failed deployment: {project_name}")
-        
-        # Remove project folder
-        if os.path.exists(project_path):
-            shutil.rmtree(project_path)
-        
-        # Clean up nginx config
-        nginx_manager = NginxManager()
-        nginx_manager.cleanup_config(project_name)
-        
-        # Clean up database
-        db_manager = DatabaseManager()
-        db_manager.cleanup_database(project_name)
-        
-        print(f"✅ Cleanup completed for: {project_name}")
-        
-    except Exception as e:
-        print(f"⚠️ Cleanup error: {e}")
-
 def cleanup_existing_project(project_name):
     """Clean up existing project on same port"""
     try:
@@ -157,6 +135,28 @@ def cleanup_existing_project(project_name):
         
         # Reload nginx after cleanup
         subprocess.run(['systemctl', 'reload', 'nginx'], check=False)
+        
+        print(f"✅ Cleanup completed for: {project_name}")
+        
+    except Exception as e:
+        print(f"⚠️ Cleanup error: {e}")
+
+def cleanup_failed_deployment(project_path, project_name):
+    """Clean up failed deployment"""
+    try:
+        print(f"🧹 Cleaning up failed deployment: {project_name}")
+        
+        # Remove project folder
+        if os.path.exists(project_path):
+            shutil.rmtree(project_path)
+        
+        # Clean up nginx config
+        nginx_manager = NginxManager()
+        nginx_manager.cleanup_config(project_name)
+        
+        # Clean up database
+        db_manager = DatabaseManager()
+        db_manager.cleanup_database(project_name)
         
         print(f"✅ Cleanup completed for: {project_name}")
         

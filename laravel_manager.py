@@ -69,7 +69,6 @@ class LaravelManager:
         content = content.replace('DB_HOST=localhost', 'DB_HOST=127.0.0.1')
         
         # Update database credentials
-        import re
         content = re.sub(r'DB_DATABASE=.*', f'DB_DATABASE=laravel_{project_name}', content)
         content = re.sub(r'DB_USERNAME=.*', f'DB_USERNAME={db_user}', content)
         content = re.sub(r'DB_PASSWORD=.*', f'DB_PASSWORD={db_password}', content)
@@ -84,7 +83,7 @@ class LaravelManager:
         
         with open(env_path, 'w') as f:
             f.write(content)
-
+    
     def _create_basic_env(self, project_path, project_name, db_user, db_password):
         """Create basic .env file"""
         basic_env = f"""APP_NAME=Laravel
@@ -153,4 +152,5 @@ QUEUE_CONNECTION=sync
         """Clear Laravel caches"""
         subprocess.run(['php', 'artisan', 'config:clear'], cwd=project_path, check=False)
         subprocess.run(['php', 'artisan', 'cache:clear'], cwd=project_path, check=False)
+        subprocess.run(['php', 'artisan', 'view:clear'], cwd=project_path, check=False)
         subprocess.run(['php', 'artisan', 'view:clear'], cwd=project_path, check=False)

@@ -63,7 +63,7 @@ class NginxManager:
     }}
 }}"""
 
-    def _test_nginx_config(self, project_id, config_path):
+    def _test_nginx_config(self, project_name, config_path):
         """Test nginx configuration"""
         try:
             subprocess.run(['nginx', '-t'], capture_output=True, text=True, check=True)
@@ -71,7 +71,7 @@ class NginxManager:
         except subprocess.CalledProcessError as e:
             print(f"❌ Nginx config test failed: {e.stderr}")
             # Remove invalid config
-            self.cleanup_config(project_id)
+            self.cleanup_config(project_name)
             raise Exception(f"Nginx configuration test failed: {e.stderr}")
     
     def _fix_nginx_conflicts(self):
