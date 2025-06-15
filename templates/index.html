@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h4><i class="fas fa-upload"></i> Deploy Laravel Project</h4>
+            </div>
+            <div class="card-body">
+                <form id="deployForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="git_repo" class="form-label">
+                            <i class="fab fa-git-alt"></i> Git Repository URL *
+                        </label>
+                        <input type="url" class="form-control" id="git_repo" name="git_repo" 
+                               placeholder="https://github.com/username/repository.git" required>
+                        <div class="form-text">Public Git repository URL</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="database_file" class="form-label">
+                            <i class="fas fa-database"></i> Database File (Optional)
+                        </label>
+                        <input type="file" class="form-control" id="database_file" name="database_file" 
+                               accept=".sql">
+                        <div class="form-text">Upload your database.sql file</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="env_file" class="form-label">
+                            <i class="fas fa-cog"></i> Environment File (Optional)
+                        </label>
+                        <input type="file" class="form-control" id="env_file" name="env_file" 
+                               accept=".env">
+                        <div class="form-text">Upload your .env configuration file</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="domain" class="form-label">
+                            <i class="fas fa-globe"></i> Domain (Optional)
+                        </label>
+                        <input type="text" class="form-control" id="domain" name="domain" 
+                               placeholder="example.com">
+                        <div class="form-text">Leave empty to use server IP</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="port" class="form-label">
+                            <i class="fas fa-network-wired"></i> Port
+                        </label>
+                        <select class="form-select" id="port" name="port">
+                            <option value="80" selected>80 (HTTP)</option>
+                            <option value="8080">8080</option>
+                            <option value="3000">3000</option>
+                            <option value="8000">8000</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg w-100">
+                        <i class="fas fa-rocket"></i> Deploy Project
+                    </button>
+                </form>
+
+                <div id="deploymentStatus" class="deployment-status">
+                    <div class="alert alert-info">
+                        <div class="loading"></div>
+                        <strong>Deploying...</strong> Please wait while we set up your Laravel project.
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div id="deploymentResult" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('deployForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const statusDiv = document.getElementById('deploymentStatus');
+    const resultDiv = document.getElementById('deploymentResult');
+    const progressBar = statusDiv.querySelector('.progress-bar');
+    
+    // Show loading status
+    statusDiv.style.display = 'block';
+    resultDiv.innerHTML = '';
+    
+    // Simulate progress
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress > 90) progress = 90;
+        progressBar.style.width = progress + '%';
+    }, 1000);
+    
+    fetch('/deploy', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        clearInterval(progressInterval);
+        progressBar.style.width = '100%';
+        statusDiv.style.display = 'none';
+        
+        if (data.success) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <h5><i class="fas fa-check-circle"></i> Deployment Successful!</h5>
+                    <p><strong>Project ID:</strong> ${data.project_id}</p>
+                    <p><strong>Access URL:</strong> <a href="${data.access_url}" target="_blank">${data.access_url}</a></p>
+                    ${data.ssl_status ? `<p><strong>SSL Status:</strong> ${data.ssl_status}</p>` : ''}
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <h5><i class="fas fa-exclamation-triangle"></i> Deployment Failed</h5>
+                    <p>${data.message}</p>
+                </div>
+            `;
+        }
+    })
+    .catch(error => {
+        clearInterval(progressInterval);
+        statusDiv.style.display = 'none';
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <h5><i class="fas fa-exclamation-triangle"></i> Error</h5>
+                <p>An error occurred during deployment: ${error.message}</p>
+            </div>
+        `;
+    });
+});
+</script>
+{% endblock %}
