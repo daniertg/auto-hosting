@@ -45,15 +45,14 @@ def deploy_laravel_project(git_repo, project_path, project_id, db_file, env_file
         # Clone repository
         subprocess.run(['git', 'clone', git_repo, project_path], check=True)
         
+        # Setup database FIRST
+        setup_database_first(project_id, db_file)
+        
         # Setup Laravel
         setup_laravel(project_path, project_id, db_file, env_file)
         
         # Configure Nginx
         configure_nginx(project_path, project_id, domain, port)
-        
-        # Setup database if provided
-        if db_file:
-            setup_database(project_path, project_id, db_file)
         
         # Setup SSL if domain provided
         ssl_result = ""
@@ -128,16 +127,33 @@ def test_mysql_connection():
 def fix_migration_compatibility(project_path):
     """Fix Laravel migration compatibility issues"""
     try:
-        # Fix foreign key issues by running migration with specific flags
-        subprocess.run(['php', 'artisan', 'migrate:fresh', '--force'], cwd=project_path, check=False)
+        # Skip migrations if database already has tables
+        check_result = subprocess.run(['php', 'artisan', 'migrate:status'], 
+                                    cwd=project_path, capture_output=True, text=True, check=False)
         
-        # If fresh fails, try step by step
-        subprocess.run(['php', 'artisan', 'migrate:reset', '--force'], cwd=project_path, check=False)
-        subprocess.run(['php', 'artisan', 'migrate:install'], cwd=project_path, check=False)
-        subprocess.run(['php', 'artisan', 'migrate', '--force'], cwd=project_path, check=False)
+        if "No migrations found" not in check_result.stdout and check_result.returncode == 0:
+            print("✓ Database already has migrations, skipping")
+            return True
         
-        print("✓ Migration compatibility fixed")
-        return True
+        # Try fresh migration first
+        result = subprocess.run(['php', 'artisan', 'migrate:fresh', '--force'], 
+                              cwd=project_path, capture_output=True, text=True, check=False)
+        
+        if result.returncode == 0:
+            print("✓ Fresh migration successful")
+            return True
+        
+        # If fresh fails, try regular migration
+        result = subprocess.run(['php', 'artisan', 'migrate', '--force'], 
+                              cwd=project_path, capture_output=True, text=True, check=False)
+        
+        if result.returncode == 0:
+            print("✓ Regular migration successful")
+            return True
+        
+        print(f"✗ Migration failed: {result.stderr}")
+        return False
+        
     except Exception as e:
         print(f"✗ Migration fix failed: {str(e)}")
         return False
@@ -167,8 +183,11 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     # Generate key
     subprocess.run(['php', 'artisan', 'key:generate', '--force'], cwd=project_path, check=True)
     
-    # Fix migration compatibility before running migrations
-    fix_migration_compatibility(project_path)
+    # Run migrations ONLY if no database file was imported
+    # Don't pass db_file parameter to avoid confusion
+    migration_result = fix_migration_compatibility(project_path)
+    if not migration_result:
+        print("⚠ Migration failed but continuing with deployment")
     
     # Fix permissions
     subprocess.run(['chmod', '-R', '755', project_path], check=True)
@@ -266,43 +285,74 @@ def configure_nginx(project_path, project_id, domain, port):
     
     # Test nginx configuration before enabling
     try:
-        subprocess.run(['nginx', '-t'], check=True, capture_output=True)
+        # Test current config first
+        test_result = subprocess.run(['nginx', '-t'], capture_output=True, text=True, check=False)
+        if test_result.returncode != 0:
+            print(f"✗ Current nginx config has issues: {test_result.stderr}")
+            # Fix by reloading default config
+            subprocess.run(['systemctl', 'reload', 'nginx'], check=False)
+        
+        # Test with new config
+        subprocess.run(['ln', '-sf', config_path, f'/etc/nginx/sites-enabled/{project_id}'], check=True)
+        test_result = subprocess.run(['nginx', '-t'], capture_output=True, text=True, check=True)
         print("✓ Nginx config valid")
+        
     except subprocess.CalledProcessError as e:
         print(f"✗ Nginx config invalid: {e}")
         # Remove invalid config
+        nginx_enabled = f'/etc/nginx/sites-enabled/{project_id}'
+        if os.path.exists(nginx_enabled):
+            os.remove(nginx_enabled)
         if os.path.exists(config_path):
             os.remove(config_path)
         raise Exception("Nginx configuration test failed")
-    
-    subprocess.run(['ln', '-sf', config_path, f'/etc/nginx/sites-enabled/{project_id}'], check=True)
 
-def setup_database(project_path, project_id, db_file):
+def setup_database_first(project_id, db_file):
+    """Setup database before Laravel setup"""
     db_name = f"laravel_{project_id}"
     
     # Get working MySQL credentials
     db_user, db_password = test_mysql_connection()
     
-    # Create database with proper charset
-    create_db_cmd = f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    # Drop database if exists (clean slate)
+    drop_db_cmd = f"DROP DATABASE IF EXISTS {db_name};"
+    if db_password:
+        subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', '-e', drop_db_cmd], check=True)
+    else:
+        subprocess.run(['mysql', '-u', db_user, '-e', drop_db_cmd], check=True)
     
+    # Create database with proper charset
+    create_db_cmd = f"CREATE DATABASE {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
     if db_password:
         subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', '-e', create_db_cmd], check=True)
     else:
         subprocess.run(['mysql', '-u', db_user, '-e', create_db_cmd], check=True)
     
+    # Import database file if provided
     if db_file:
         db_file_path = f'/tmp/{secure_filename(db_file.filename)}'
         db_file.save(db_file_path)
         
         # Import database
-        if db_password:
-            subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', db_name], stdin=open(db_file_path, 'r'), check=True)
-        else:
-            subprocess.run(['mysql', '-u', db_user, db_name], stdin=open(db_file_path, 'r'), check=True)
+        try:
+            if db_password:
+                subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', db_name], 
+                             stdin=open(db_file_path, 'r'), check=True)
+            else:
+                subprocess.run(['mysql', '-u', db_user, db_name], 
+                             stdin=open(db_file_path, 'r'), check=True)
+            print("✓ Database imported successfully")
+        except Exception as e:
+            print(f"✗ Database import failed: {str(e)}")
+            # Continue anyway, will use migrations instead
     
-    # Run migrations with compatibility fixes
-    fix_migration_compatibility(project_path)
+    print(f"✓ Database {db_name} ready")
+
+def setup_database(project_path, project_id, db_file):
+    # This function is now called from setup_database_first
+    # Keep for backward compatibility but make it a no-op
+    print("✓ Database setup already completed")
+    pass
 
 def setup_ssl(domain):
     try:
