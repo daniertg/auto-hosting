@@ -85,8 +85,44 @@ def fix_existing_project(project_path):
     except:
         pass
     
+    # 5. Fix database configuration
+    env_path = os.path.join(project_path, '.env')
+    if os.path.exists(env_path):
+        fix_env_database(env_path)
+        print("✓ Fixed database configuration")
+    
     print("✓ Project fixed successfully!")
     return True
+
+def fix_env_database(env_path):
+    """Fix database configuration in existing .env file"""
+    
+    with open(env_path, 'r') as f:
+        content = f.read()
+    
+    # Fix common database hostname issues
+    fixes = {
+        'DB_HOST=db': 'DB_HOST=127.0.0.1',
+        'DB_HOST=mysql': 'DB_HOST=127.0.0.1',
+        'DB_HOST=localhost': 'DB_HOST=127.0.0.1',
+        'DB_PASSWORD=password': 'DB_PASSWORD=',
+        'DB_PASSWORD=secret': 'DB_PASSWORD='
+    }
+    
+    for old, new in fixes.items():
+        if old in content:
+            content = content.replace(old, new)
+            print(f"  - Fixed: {old} -> {new}")
+    
+    # Ensure DB_CONNECTION is mysql
+    if 'DB_CONNECTION=' not in content:
+        content += '\nDB_CONNECTION=mysql'
+    elif 'DB_CONNECTION=mysql' not in content:
+        import re
+        content = re.sub(r'DB_CONNECTION=.*', 'DB_CONNECTION=mysql', content)
+    
+    with open(env_path, 'w') as f:
+        f.write(content)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
