@@ -22,9 +22,30 @@ chmod +x /usr/local/bin/composer
 # Install Flask
 pip3 install flask werkzeug
 
-# Configure MySQL
-mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '';"
+# Configure MySQL properly
+systemctl start mysql
+systemctl enable mysql
+
+# Fix MySQL authentication - multiple approaches for compatibility
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '';" 2>/dev/null || true
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '';" 2>/dev/null || true
+mysql -u root -e "SET PASSWORD FOR 'root'@'localhost' = PASSWORD('');" 2>/dev/null || true
+mysql -e "UPDATE mysql.user SET authentication_string = '' WHERE User = 'root' AND Host = 'localhost';" 2>/dev/null || true
+mysql -e "UPDATE mysql.user SET plugin = 'mysql_native_password' WHERE User = 'root' AND Host = 'localhost';" 2>/dev/null || true
 mysql -e "FLUSH PRIVILEGES;"
+
+# Test MySQL connection
+echo "Testing MySQL connection..."
+if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+    echo "✓ MySQL root authentication working"
+else
+    echo "✗ MySQL authentication still failing, trying alternative setup..."
+    # Alternative setup for problematic systems
+    mysql -e "CREATE USER IF NOT EXISTS 'laravel'@'localhost' IDENTIFIED BY 'laravel123';"
+    mysql -e "GRANT ALL PRIVILEGES ON *.* TO 'laravel'@'localhost' WITH GRANT OPTION;"
+    mysql -e "FLUSH PRIVILEGES;"
+    echo "✓ Created alternative laravel user"
+fi
 
 # Start services
 systemctl enable nginx php8.2-fpm

@@ -105,6 +105,26 @@ def cleanup_failed_deployment(project_path, project_id):
     except:
         pass
 
+def test_mysql_connection():
+    """Test MySQL connection and return working credentials"""
+    # Try root with no password
+    try:
+        result = subprocess.run(['mysql', '-u', 'root', '-e', 'SELECT 1;'], 
+                              capture_output=True, text=True, check=True)
+        return ('root', '')
+    except:
+        pass
+    
+    # Try laravel user
+    try:
+        result = subprocess.run(['mysql', '-u', 'laravel', '-plaravel123', '-e', 'SELECT 1;'], 
+                              capture_output=True, text=True, check=True)
+        return ('laravel', 'laravel123')
+    except:
+        pass
+    
+    raise Exception("No working MySQL credentials found")
+
 def setup_laravel(project_path, project_id, db_file, env_file):
     # Remove lock file
     composer_lock = os.path.join(project_path, 'composer.lock')
@@ -117,12 +137,15 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     subprocess.run(['composer', 'update', '--no-dev', '--optimize-autoloader', '--no-interaction', '--ignore-platform-reqs'], 
                   cwd=project_path, check=True, env=env)
     
+    # Test MySQL connection first
+    db_user, db_password = test_mysql_connection()
+    
     # Handle .env file
     if env_file:
         env_file.save(os.path.join(project_path, '.env'))
-        fix_env_database_config(os.path.join(project_path, '.env'), project_id)
+        fix_env_database_config(os.path.join(project_path, '.env'), project_id, db_user, db_password)
     else:
-        create_basic_env(project_path, project_id)
+        create_basic_env(project_path, project_id, db_user, db_password)
     
     # Generate key
     subprocess.run(['php', 'artisan', 'key:generate', '--force'], cwd=project_path, check=True)
@@ -138,7 +161,7 @@ def setup_laravel(project_path, project_id, db_file, env_file):
     subprocess.run(['php', 'artisan', 'cache:clear'], cwd=project_path, check=False)
     subprocess.run(['php', 'artisan', 'view:clear'], cwd=project_path, check=False)
 
-def fix_env_database_config(env_path, project_id):
+def fix_env_database_config(env_path, project_id, db_user, db_password):
     """Fix database configuration in .env file"""
     with open(env_path, 'r') as f:
         content = f.read()
@@ -149,17 +172,24 @@ def fix_env_database_config(env_path, project_id):
     content = content.replace('DB_HOST=database', 'DB_HOST=127.0.0.1')
     content = content.replace('DB_HOST=localhost', 'DB_HOST=127.0.0.1')
     
-    # Ensure correct database name
-    if 'DB_DATABASE=' in content:
-        import re
-        content = re.sub(r'DB_DATABASE=.*', f'DB_DATABASE=laravel_{project_id}', content)
-    else:
+    # Update database credentials
+    import re
+    content = re.sub(r'DB_DATABASE=.*', f'DB_DATABASE=laravel_{project_id}', content)
+    content = re.sub(r'DB_USERNAME=.*', f'DB_USERNAME={db_user}', content)
+    content = re.sub(r'DB_PASSWORD=.*', f'DB_PASSWORD={db_password}', content)
+    
+    # Add missing config if not present
+    if 'DB_DATABASE=' not in content:
         content += f'\nDB_DATABASE=laravel_{project_id}'
+    if 'DB_USERNAME=' not in content:
+        content += f'\nDB_USERNAME={db_user}'
+    if 'DB_PASSWORD=' not in content:
+        content += f'\nDB_PASSWORD={db_password}'
     
     with open(env_path, 'w') as f:
         f.write(content)
 
-def create_basic_env(project_path, project_id):
+def create_basic_env(project_path, project_id, db_user, db_password):
     basic_env = f"""APP_NAME=Laravel
 APP_ENV=production
 APP_KEY=
@@ -170,8 +200,8 @@ DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_DATABASE=laravel_{project_id}
-DB_USERNAME=root
-DB_PASSWORD=
+DB_USERNAME={db_user}
+DB_PASSWORD={db_password}
 
 CACHE_DRIVER=file
 SESSION_DRIVER=file
@@ -182,8 +212,7 @@ QUEUE_CONNECTION=sync
         f.write(basic_env)
 
 def configure_nginx(project_path, project_id, domain, port):
-    nginx_config = f"""
-server {{
+    nginx_config = f"""server {{
     listen {port};
     server_name {domain if domain else '_'};
     root {project_path}/public;
@@ -209,23 +238,37 @@ server {{
         add_header Cache-Control "public, immutable";
         try_files $uri =404;
     }}
-}}
-"""
+}}"""
     
     config_path = f'/etc/nginx/sites-available/{project_id}'
     with open(config_path, 'w') as f:
         f.write(nginx_config)
     
+    # Test nginx configuration before enabling
+    subprocess.run(['nginx', '-t'], check=True)
+    
     subprocess.run(['ln', '-sf', config_path, f'/etc/nginx/sites-enabled/{project_id}'], check=True)
 
 def setup_database(project_path, project_id, db_file):
     db_name = f"laravel_{project_id}"
-    subprocess.run(['mysql', '-e', f'CREATE DATABASE IF NOT EXISTS {db_name}'], check=True)
+    
+    # Get working MySQL credentials
+    db_user, db_password = test_mysql_connection()
+    
+    # Create database
+    if db_password:
+        subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', '-e', f'CREATE DATABASE IF NOT EXISTS {db_name}'], check=True)
+    else:
+        subprocess.run(['mysql', '-u', db_user, '-e', f'CREATE DATABASE IF NOT EXISTS {db_name}'], check=True)
     
     db_file_path = f'/tmp/{secure_filename(db_file.filename)}'
     db_file.save(db_file_path)
     
-    subprocess.run(['mysql', db_name], stdin=open(db_file_path, 'r'), check=True)
+    # Import database
+    if db_password:
+        subprocess.run(['mysql', '-u', db_user, f'-p{db_password}', db_name], stdin=open(db_file_path, 'r'), check=True)
+    else:
+        subprocess.run(['mysql', '-u', db_user, db_name], stdin=open(db_file_path, 'r'), check=True)
     
     # Run migrations
     subprocess.run(['php', 'artisan', 'migrate', '--force'], cwd=project_path, check=False)
