@@ -7,6 +7,125 @@ class LaravelManager:
     def __init__(self):
         self.db_manager = DatabaseManager()
     
+    def _install_dependencies(self, project_path):
+        """Install Composer dependencies with better error handling"""
+        try:
+            # Remove vendor directory if corrupted
+            vendor_dir = os.path.join(project_path, 'vendor')
+            if os.path.exists(vendor_dir):
+                import shutil
+                shutil.rmtree(vendor_dir)
+                print("✓ Removed corrupted vendor directory")
+            
+            # Clear composer cache
+            env = os.environ.copy()
+            env['COMPOSER_ALLOW_SUPERUSER'] = '1'
+            
+            subprocess.run(['composer', 'clear-cache'], cwd=project_path, env=env, check=False)
+            print("✓ Cleared composer cache")
+            
+            # Install fresh dependencies
+            result = subprocess.run([
+                'composer', 'install', 
+                '--no-dev', 
+                '--optimize-autoloader', 
+                '--no-interaction', 
+                '--ignore-platform-reqs',
+                '--prefer-dist'
+            ], cwd=project_path, env=env, capture_output=True, text=True, check=False)
+            
+            if result.returncode == 0:
+                print("✅ Composer install successful")
+                return True
+            else:
+                print(f"⚠️ Composer install failed, trying update: {result.stderr}")
+                
+                # If install fails, try update
+                result = subprocess.run([
+                    'composer', 'update', 
+                    '--no-dev', 
+                    '--optimize-autoloader', 
+                    '--no-interaction', 
+                    '--ignore-platform-reqs',
+                    '--prefer-dist'
+                ], cwd=project_path, env=env, capture_output=True, text=True, check=False)
+                
+                if result.returncode == 0:
+                    print("✅ Composer update successful")
+                    return True
+                else:
+                    print(f"❌ Both composer install and update failed: {result.stderr}")
+                    # Try compatibility fix
+                    return self._fix_composer_compatibility(project_path)
+                    
+        except Exception as e:
+            print(f"❌ Error installing dependencies: {str(e)}")
+            return self._fix_composer_compatibility(project_path)
+
+    def _fix_composer_compatibility(self, project_path):
+        """Fix composer compatibility issues"""
+        try:
+            print("🔧 Attempting composer compatibility fix...")
+            
+            # Use the fix_compatibility script
+            fix_script_path = os.path.join(os.path.dirname(__file__), 'fix_compatibility.py')
+            if os.path.exists(fix_script_path):
+                result = subprocess.run(['python3', fix_script_path, project_path], 
+                                      capture_output=True, text=True, check=False)
+                
+                if result.returncode == 0:
+                    print("✅ Compatibility fix successful")
+                    return True
+                else:
+                    print(f"⚠️ Compatibility fix failed: {result.stderr}")
+            
+            # Manual compatibility fix
+            return self._manual_composer_fix(project_path)
+            
+        except Exception as e:
+            print(f"❌ Compatibility fix error: {str(e)}")
+            return False
+
+    def _manual_composer_fix(self, project_path):
+        """Manual composer fix as fallback"""
+        try:
+            print("🔧 Manual composer fix...")
+            
+            env = os.environ.copy()
+            env['COMPOSER_ALLOW_SUPERUSER'] = '1'
+            
+            # Remove composer.lock
+            composer_lock = os.path.join(project_path, 'composer.lock')
+            if os.path.exists(composer_lock):
+                os.remove(composer_lock)
+                print("✓ Removed composer.lock")
+            
+            # Try install without optimization first
+            result = subprocess.run([
+                'composer', 'install', 
+                '--no-interaction', 
+                '--ignore-platform-reqs',
+                '--no-scripts'
+            ], cwd=project_path, env=env, capture_output=True, text=True, check=False)
+            
+            if result.returncode == 0:
+                print("✅ Basic composer install successful")
+                
+                # Now try with optimization
+                subprocess.run([
+                    'composer', 'dump-autoload', 
+                    '--optimize'
+                ], cwd=project_path, env=env, check=False)
+                
+                return True
+            else:
+                print(f"❌ Manual fix failed: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Manual fix error: {str(e)}")
+            return False
+
     def setup_laravel(self, project_path, project_name, db_file, env_file):
         """Setup Laravel project"""
         # Remove lock file
@@ -14,15 +133,19 @@ class LaravelManager:
         if os.path.exists(composer_lock):
             os.remove(composer_lock)
         
-        # Install dependencies
-        self._install_dependencies(project_path)
+        # Install dependencies with better error handling
+        if not self._install_dependencies(project_path):
+            print("⚠️ Dependency installation failed, continuing anyway...")
         
         # Setup .env file
         db_user, db_password = self.db_manager.get_credentials()
         self._setup_env_file(project_path, project_name, env_file, db_user, db_password)
         
         # Generate application key
-        subprocess.run(['php', 'artisan', 'key:generate', '--force'], cwd=project_path, check=True)
+        try:
+            subprocess.run(['php', 'artisan', 'key:generate', '--force'], cwd=project_path, check=True)
+        except Exception as e:
+            print(f"⚠️ Key generation failed: {e}")
         
         # Run migrations
         migration_result = self._run_migrations(project_path)
@@ -36,18 +159,6 @@ class LaravelManager:
         self._clear_caches(project_path)
         
         print("✅ Laravel setup completed")
-    
-    def _install_dependencies(self, project_path):
-        """Install Composer dependencies"""
-        env = os.environ.copy()
-        env['COMPOSER_ALLOW_SUPERUSER'] = '1'
-        subprocess.run([
-            'composer', 'update', 
-            '--no-dev', 
-            '--optimize-autoloader', 
-            '--no-interaction', 
-            '--ignore-platform-reqs'
-        ], cwd=project_path, check=True, env=env)
     
     def _setup_env_file(self, project_path, project_name, env_file, db_user, db_password):
         """Setup .env file"""

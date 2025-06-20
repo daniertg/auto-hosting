@@ -133,6 +133,13 @@ def cleanup_existing_project(project_name):
         db_manager.cleanup_database(project_name)
         print(f"✓ Cleaned database for: {project_name}")
         
+        # Test nginx config after cleanup
+        try:
+            subprocess.run(['nginx', '-t'], check=True, capture_output=True)
+            print("✓ Nginx config valid after cleanup")
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ Nginx config issues after cleanup: {e.stderr}")
+        
         # Reload nginx after cleanup
         subprocess.run(['systemctl', 'reload', 'nginx'], check=False)
         

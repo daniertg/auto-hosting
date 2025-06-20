@@ -206,6 +206,9 @@ class ServiceManager:
     def _manage_nginx(self):
         """Manage Nginx service"""
         try:
+            # Test nginx config first before any reload/restart
+            self._test_and_fix_nginx_config()
+            
             # Check if nginx is running
             status_result = subprocess.run(['systemctl', 'is-active', 'nginx'], 
                                          capture_output=True, text=True, check=False)
@@ -217,6 +220,8 @@ class ServiceManager:
                 if result.returncode == 0:
                     print("✅ Nginx reloaded successfully")
                     return
+                else:
+                    print(f"⚠️ Nginx reload failed: {result.stderr}")
             
             # Start nginx
             result = subprocess.run(['systemctl', 'start', 'nginx'], 
@@ -225,9 +230,110 @@ class ServiceManager:
             if result.returncode == 0:
                 print("✅ Nginx started successfully")
             else:
+                print(f"⚠️ Nginx start failed: {result.stderr}")
                 # Try restart
-                subprocess.run(['systemctl', 'restart', 'nginx'], check=True)
-                print("✅ Nginx restarted successfully")
+                result = subprocess.run(['systemctl', 'restart', 'nginx'], 
+                                       capture_output=True, text=True, check=False)
+                if result.returncode == 0:
+                    print("✅ Nginx restarted successfully")
+                else:
+                    print(f"❌ Nginx restart failed: {result.stderr}")
+                    # Force clean restart
+                    self._force_nginx_restart()
                 
         except Exception as e:
             print(f"⚠️ Nginx management failed: {e}")
+            self._force_nginx_restart()
+    
+    def _test_and_fix_nginx_config(self):
+        """Test nginx config and fix if needed"""
+        try:
+            result = subprocess.run(['nginx', '-t'], capture_output=True, text=True, check=False)
+            
+            if result.returncode != 0:
+                print(f"⚠️ Nginx config has issues: {result.stderr}")
+                
+                # Check for common issues and fix
+                if "conflicting server name" in result.stderr:
+                    self._fix_conflicting_server_names()
+                
+                if "failed" in result.stderr.lower():
+                    self._emergency_nginx_fix()
+                    
+        except Exception as e:
+            print(f"⚠️ Could not test nginx config: {e}")
+    
+    def _fix_conflicting_server_names(self):
+        """Fix conflicting server names"""
+        try:
+            print("🔧 Fixing conflicting server names...")
+            
+            # List all enabled sites
+            enabled_dir = '/etc/nginx/sites-enabled'
+            if os.path.exists(enabled_dir):
+                sites = os.listdir(enabled_dir)
+                print(f"Found enabled sites: {sites}")
+                
+                # Keep only the latest port-based config
+                port_configs = [s for s in sites if s.startswith('port_')]
+                old_configs = [s for s in sites if not s.startswith('port_') and s != 'default']
+                
+                # Remove old configs
+                for config in old_configs:
+                    config_path = os.path.join(enabled_dir, config)
+                    if os.path.exists(config_path):
+                        os.remove(config_path)
+                        print(f"✓ Removed conflicting config: {config}")
+            
+        except Exception as e:
+            print(f"⚠️ Could not fix conflicting server names: {e}")
+    
+    def _emergency_nginx_fix(self):
+        """Emergency nginx fix - disable all sites and enable only working ones"""
+        try:
+            print("🚨 Emergency nginx fix...")
+            
+            # Disable all sites
+            enabled_dir = '/etc/nginx/sites-enabled'
+            if os.path.exists(enabled_dir):
+                for site in os.listdir(enabled_dir):
+                    site_path = os.path.join(enabled_dir, site)
+                    if os.path.exists(site_path):
+                        os.remove(site_path)
+                        print(f"✓ Disabled site: {site}")
+            
+            # Test if nginx config is now valid
+            result = subprocess.run(['nginx', '-t'], capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                print("✅ Emergency fix successful - nginx config now valid")
+            else:
+                print("❌ Emergency fix failed - nginx still has issues")
+                
+        except Exception as e:
+            print(f"❌ Emergency fix failed: {e}")
+    
+    def _force_nginx_restart(self):
+        """Force nginx restart with clean config"""
+        try:
+            print("🔧 Force restarting nginx...")
+            
+            # Stop nginx
+            subprocess.run(['systemctl', 'stop', 'nginx'], check=False)
+            
+            # Kill any remaining nginx processes
+            subprocess.run(['pkill', '-f', 'nginx'], check=False)
+            
+            # Emergency config cleanup
+            self._emergency_nginx_fix()
+            
+            # Start nginx
+            result = subprocess.run(['systemctl', 'start', 'nginx'], 
+                                   capture_output=True, text=True, check=False)
+            
+            if result.returncode == 0:
+                print("✅ Force restart successful")
+            else:
+                print(f"❌ Force restart failed: {result.stderr}")
+                
+        except Exception as e:
+            print(f"❌ Force restart failed: {e}")

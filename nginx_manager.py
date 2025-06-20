@@ -9,8 +9,8 @@ class NginxManager:
         service_manager = ServiceManager()
         php_socket = service_manager.get_php_socket()
         
-        # Remove conflicting configs first
-        self._fix_nginx_conflicts()
+        # Clean ALL existing configs first
+        self._cleanup_all_configs()
         
         # Remove existing config for this port (if any)
         self.cleanup_config(project_name)
@@ -30,6 +30,46 @@ class NginxManager:
         self._test_nginx_config(project_name, config_path)
         
         print(f"✅ Nginx configured successfully for port {port}")
+
+    def _cleanup_all_configs(self):
+        """Clean up ALL existing nginx configs to prevent conflicts"""
+        try:
+            print("🧹 Cleaning up all existing nginx configs...")
+            
+            # Get all enabled sites
+            enabled_sites_dir = '/etc/nginx/sites-enabled'
+            if os.path.exists(enabled_sites_dir):
+                enabled_sites = os.listdir(enabled_sites_dir)
+                
+                # Remove all enabled sites except default nginx config
+                for site in enabled_sites:
+                    site_path = os.path.join(enabled_sites_dir, site)
+                    if site != 'default' and os.path.islink(site_path):
+                        os.remove(site_path)
+                        print(f"✓ Removed enabled site: {site}")
+            
+            # Clean up old project configs from sites-available
+            available_sites_dir = '/etc/nginx/sites-available'
+            if os.path.exists(available_sites_dir):
+                available_sites = os.listdir(available_sites_dir)
+                
+                # Remove old project configs (anything that looks like project ID)
+                for site in available_sites:
+                    site_path = os.path.join(available_sites_dir, site)
+                    # Skip default nginx configs
+                    if site in ['default', '000-default']:
+                        continue
+                    
+                    # Remove if it's a project config (8 chars or port_xx format)
+                    if (len(site) == 8 and site.isalnum()) or site.startswith('port_'):
+                        if os.path.exists(site_path):
+                            os.remove(site_path)
+                            print(f"✓ Removed available site: {site}")
+            
+            print("✅ All old configs cleaned up")
+            
+        except Exception as e:
+            print(f"⚠️ Error cleaning configs: {e}")
 
     def _generate_nginx_config(self, project_path, project_name, domain, port, php_socket):
         """Generate nginx configuration"""
@@ -66,8 +106,13 @@ class NginxManager:
     def _test_nginx_config(self, project_name, config_path):
         """Test nginx configuration"""
         try:
-            subprocess.run(['nginx', '-t'], capture_output=True, text=True, check=True)
+            result = subprocess.run(['nginx', '-t'], capture_output=True, text=True, check=True)
             print("✅ Nginx config test passed")
+            
+            # Also check for conflicting server names
+            if "conflicting server name" in result.stderr:
+                print("⚠️ Detected conflicting server names, but config is valid")
+            
         except subprocess.CalledProcessError as e:
             print(f"❌ Nginx config test failed: {e.stderr}")
             # Remove invalid config
